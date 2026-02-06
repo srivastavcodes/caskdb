@@ -3,6 +3,7 @@ module github.com/srivastavcodes/caskdb
 go 1.25
 
 require (
+	github.com/google/btree v1.1.3
 	github.com/stretchr/testify v1.11.1
 	github.com/valyala/bytebufferpool v1.0.0
 )
