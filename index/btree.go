@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	"github.com/google/btree"
-	wal "github.com/srivastavcodes/caskdb/write-ahead-log"
+	wal "github.com/srivastavcodes/write-ahead-log"
 )
 
 var _ Indexer = (*MemoryBTree)(nil)

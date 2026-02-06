@@ -1,6 +1,6 @@
 package index
 
-import wal "github.com/srivastavcodes/caskdb/write-ahead-log"
+import wal "github.com/srivastavcodes/write-ahead-log"
 
 // Indexer is an interface for indexing key and position. It is used to store
 // the key and position of the data in the Wal. The index will be rebuilt

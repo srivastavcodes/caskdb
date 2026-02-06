@@ -3,7 +3,7 @@ package cask
 import (
 	"encoding/binary"
 
-	wal "github.com/srivastavcodes/caskdb/write-ahead-log"
+	wal "github.com/srivastavcodes/write-ahead-log"
 	"github.com/valyala/bytebufferpool"
 )
 
