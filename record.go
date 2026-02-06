@@ -8,7 +8,7 @@ import (
 )
 
 // LogRecordType is the type of the Log Record.
-type LogRecordType byte
+type LogRecordType = byte
 
 const (
 	LogRecordNormal LogRecordType = iota
@@ -55,8 +55,8 @@ type IndexRecord struct {
 //
 //	1 byte	varint(max 10) varint(max 5)  varint(max 5) varint(max 10) --------data--------
 func encodeLogRecord(lr *LogRecord, header []byte, buf *bytebufferpool.ByteBuffer) []byte {
-	header[0] = byte(lr.Type)
-	var index = 1
+	header[0] = lr.Type
+	index := 1
 
 	index += binary.PutUvarint(header[index:], lr.BatchId)
 	index += binary.PutUvarint(header[index:], uint64(len(lr.Key)))
@@ -73,7 +73,7 @@ func encodeLogRecord(lr *LogRecord, header []byte, buf *bytebufferpool.ByteBuffe
 // decodeLogRecord decodes the log record from the given byte slice.
 func decodeLogRecord(buf []byte) *LogRecord {
 	recordType := buf[0]
-	var index = 1
+	index := 1
 
 	batchId, n := binary.Uvarint(buf[index:])
 	index += n
@@ -94,7 +94,7 @@ func decodeLogRecord(buf []byte) *LogRecord {
 
 	return &LogRecord{Key: key, Val: val,
 		BatchId: batchId,
-		Type:    LogRecordType(recordType),
+		Type:    recordType,
 		Expire:  expire,
 	}
 }
