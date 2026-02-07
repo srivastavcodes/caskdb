@@ -5,6 +5,7 @@ go 1.25
 require (
 	github.com/gofrs/flock v0.13.0
 	github.com/google/btree v1.1.3
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/srivastavcodes/write-ahead-log v0.1.1
 	github.com/stretchr/testify v1.11.1
 	github.com/valyala/bytebufferpool v1.0.0
