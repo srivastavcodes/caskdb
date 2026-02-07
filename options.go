@@ -96,12 +96,12 @@ var DefaultOptions = Options{
 	AutoMergeCronExpr: "",
 }
 
-var defaultBatchOptions = BatchOptions{
+var DefaultBatchOptions = BatchOptions{
 	Sync:     true,
 	ReadOnly: false,
 }
 
-var defaultIteratorOptions = IteratorOptions{
+var DefaultIteratorOptions = IteratorOptions{
 	Prefix:          nil,
 	Reverse:         false,
 	ContinueOnError: false,

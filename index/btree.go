@@ -78,9 +78,9 @@ func (mbt *MemoryBTree) Get(key []byte) *wal.ChunkPosition {
 	mbt.mu.RLock()
 	defer mbt.mu.RUnlock()
 
-	pos := mbt.bTree.Get(&item{key: key})
-	if pos != nil {
-		return pos.(*item).pos
+	i := mbt.bTree.Get(&item{key: key})
+	if i != nil {
+		return i.(*item).pos
 	}
 	return nil
 }
@@ -89,9 +89,9 @@ func (mbt *MemoryBTree) Delete(key []byte) (*wal.ChunkPosition, bool) {
 	mbt.mu.Lock()
 	defer mbt.mu.Unlock()
 
-	pos := mbt.bTree.Delete(&item{key: key})
-	if pos != nil {
-		return pos.(*item).pos, true
+	i := mbt.bTree.Delete(&item{key: key})
+	if i != nil {
+		return i.(*item).pos, true
 	}
 	return nil, false
 }

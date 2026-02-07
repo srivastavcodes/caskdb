@@ -31,12 +31,12 @@ type LogRecord struct {
 	Val     []byte
 	BatchId uint64
 	Type    LogRecordType
-	Expire  int64
+	Expire  uint64
 }
 
 // IsExpired checks whether the log record is expired.
 func (lr *LogRecord) IsExpired(now int64) bool {
-	return lr.Expire > 0 && lr.Expire <= now
+	return lr.Expire > 0 && lr.Expire <= uint64(now)
 }
 
 // IndexRecord is the index record of the key. It contains the key, the position,
@@ -61,7 +61,7 @@ func encodeLogRecord(lr *LogRecord, header []byte, buf *bytebufferpool.ByteBuffe
 	index += binary.PutUvarint(header[index:], lr.BatchId)
 	index += binary.PutUvarint(header[index:], uint64(len(lr.Key)))
 	index += binary.PutUvarint(header[index:], uint64(len(lr.Val)))
-	index += binary.PutVarint(header[index:], lr.Expire)
+	index += binary.PutUvarint(header[index:], lr.Expire)
 
 	_, _ = buf.Write(header[:index])
 	_, _ = buf.Write(lr.Key)
@@ -81,7 +81,7 @@ func decodeLogRecord(buf []byte) *LogRecord {
 	index += n
 	valSize, n := binary.Uvarint(buf[index:])
 	index += n
-	expire, n := binary.Varint(buf[index:])
+	expire, n := binary.Uvarint(buf[index:])
 	index += n
 
 	key := make([]byte, keySize)
