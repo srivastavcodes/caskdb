@@ -31,7 +31,7 @@ type Batch struct {
 	rwm           sync.RWMutex
 	db            *CaskDb
 	pendingWrites []*LogRecord     // The data to be written.
-	logRecords    map[uint64][]int // Map of [hasKey][indexes] for faster lookup to pending writes.
+	recordIndexes map[uint64][]int // Map of [hasKey][indexes] for faster lookup to pending writes.
 	opts          BatchOptions
 	commited      bool // whether the batch has been committed.
 	rolledBack    bool // whether the batch has been rolled back.
@@ -53,6 +53,9 @@ func defaultNewBatch() any {
 
 // Put adds a key/val pair to the batch for writing and returns an error if any.
 func (b *Batch) Put(key, val []byte) error {
+	b.rwm.Lock()
+	defer b.rwm.Unlock()
+
 	if b.opts.ReadOnly {
 		return ErrReadOnlyBatch
 	}
@@ -62,9 +65,6 @@ func (b *Batch) Put(key, val []byte) error {
 	if len(key) == 0 {
 		return ErrKeyIsEmpty
 	}
-	b.rwm.Lock()
-	defer b.rwm.Unlock()
-
 	record := b.lookupExistingKey(key)
 	if record == nil {
 		// if the key does not exist in pendingWrites, get a new record
@@ -82,6 +82,9 @@ func (b *Batch) Put(key, val []byte) error {
 // PutWithTTL adds a key/val pair to the batch with a ttl for writing and returns
 // an error if any.
 func (b *Batch) PutWithTTL(key, val []byte, ttl time.Duration) error {
+	b.rwm.Lock()
+	defer b.rwm.Unlock()
+
 	if b.opts.ReadOnly {
 		return ErrReadOnlyBatch
 	}
@@ -91,9 +94,6 @@ func (b *Batch) PutWithTTL(key, val []byte, ttl time.Duration) error {
 	if len(key) == 0 {
 		return ErrKeyIsEmpty
 	}
-	b.rwm.Lock()
-	defer b.rwm.Unlock()
-
 	record := b.lookupExistingKey(key)
 	if record == nil {
 		// if the key does not exist in pendingWrites, get a new record
@@ -113,6 +113,9 @@ func (b *Batch) PutWithTTL(key, val []byte, ttl time.Duration) error {
 // Get retrieves the LogRecord associated with the key and validates it; if valid,
 // returns the value of the LogRecord for the key.
 func (b *Batch) Get(key []byte) ([]byte, error) {
+	b.rwm.RLock()
+	defer b.rwm.RUnlock()
+
 	if b.db.closed {
 		return nil, ErrDbClosed
 	}
@@ -121,9 +124,6 @@ func (b *Batch) Get(key []byte) ([]byte, error) {
 	}
 	now := time.Now().UnixNano()
 	// retrieve value from pending writes if exists.
-	b.rwm.RLock()
-	defer b.rwm.RUnlock()
-
 	record := b.lookupExistingKey(key)
 	if record != nil {
 		if record.Type == LogRecordDeleted || record.IsExpired(now) {
@@ -150,6 +150,9 @@ func (b *Batch) Get(key []byte) ([]byte, error) {
 
 // Delete marks a key for deletion in the batch.
 func (b *Batch) Delete(key []byte) error {
+	b.rwm.Lock()
+	defer b.rwm.Unlock()
+
 	if b.opts.ReadOnly {
 		return ErrReadOnlyBatch
 	}
@@ -159,9 +162,6 @@ func (b *Batch) Delete(key []byte) error {
 	if len(key) == 0 {
 		return ErrKeyIsEmpty
 	}
-	b.rwm.Lock()
-	defer b.rwm.Unlock()
-
 	// we'll need type and key for deletion later on, remaining mark zero val.
 	record := b.lookupExistingKey(key)
 	if record != nil {
@@ -179,6 +179,9 @@ func (b *Batch) Delete(key []byte) error {
 
 // Exists checks if a key exists in the database.
 func (b *Batch) Exists(key []byte) (bool, error) {
+	b.rwm.RLock()
+	defer b.rwm.RUnlock()
+
 	if b.db.closed {
 		return false, ErrDbClosed
 	}
@@ -186,9 +189,6 @@ func (b *Batch) Exists(key []byte) (bool, error) {
 		return false, ErrKeyIsEmpty
 	}
 	now := time.Now().UnixNano()
-
-	b.rwm.RLock()
-	defer b.rwm.RUnlock()
 
 	record := b.lookupExistingKey(key)
 	if record != nil {
@@ -213,6 +213,9 @@ func (b *Batch) Exists(key []byte) (bool, error) {
 
 // Expire sets the ttl for the key.
 func (b *Batch) Expire(key []byte, ttl time.Duration) error {
+	b.rwm.Lock()
+	defer b.rwm.Unlock()
+
 	if b.opts.ReadOnly {
 		return ErrReadOnlyBatch
 	}
@@ -223,9 +226,6 @@ func (b *Batch) Expire(key []byte, ttl time.Duration) error {
 		return ErrKeyIsEmpty
 	}
 	now := time.Now()
-
-	b.rwm.Lock()
-	defer b.rwm.Unlock()
 
 	record := b.lookupExistingKey(key)
 	if record != nil {
@@ -260,6 +260,9 @@ func (b *Batch) Expire(key []byte, ttl time.Duration) error {
 // ExpiresIn returns the remaining duration the key is valid for (the ttl uk).
 // In case of an error returns -1 and the error.
 func (b *Batch) ExpiresIn(key []byte) (time.Duration, error) {
+	b.rwm.RLock()
+	defer b.rwm.RUnlock()
+
 	if b.db.closed {
 		return -1, ErrDbClosed
 	}
@@ -267,9 +270,6 @@ func (b *Batch) ExpiresIn(key []byte) (time.Duration, error) {
 		return -1, ErrKeyIsEmpty
 	}
 	now := time.Now()
-
-	b.rwm.RLock()
-	defer b.rwm.RUnlock()
 
 	record := b.lookupExistingKey(key)
 	if record != nil {
@@ -305,6 +305,9 @@ func (b *Batch) ExpiresIn(key []byte) (time.Duration, error) {
 // PersistKey removes the ttl of the key, meaning the key will no longer expire
 // and be accessible until deleted.
 func (b *Batch) PersistKey(key []byte) error {
+	b.rwm.Lock()
+	defer b.rwm.Unlock()
+
 	if b.opts.ReadOnly {
 		return ErrReadOnlyBatch
 	}
@@ -315,9 +318,6 @@ func (b *Batch) PersistKey(key []byte) error {
 		return ErrKeyIsEmpty
 	}
 	now := time.Now()
-
-	b.rwm.Lock()
-	defer b.rwm.Unlock()
 
 	record := b.lookupExistingKey(key)
 	if record != nil {
@@ -357,6 +357,8 @@ func (b *Batch) PersistKey(key []byte) error {
 // Following this, it will write the indexes.
 func (b *Batch) Commit() error {
 	defer b.dbUnlock()
+	b.rwm.Lock()
+	defer b.rwm.Unlock()
 
 	switch {
 	case b.db.closed:
@@ -370,9 +372,6 @@ func (b *Batch) Commit() error {
 	case b.rolledBack:
 		return ErrBatchRolledBack
 	}
-	b.rwm.Lock()
-	defer b.rwm.Unlock()
-
 	batchId := b.batchId.Add(1)
 	now := time.Now().UnixNano()
 
@@ -437,15 +436,48 @@ func (b *Batch) Commit() error {
 	return nil
 }
 
+// Rollback discards an uncommitted batch instance. The discard operation will
+// clear the buffered data and release the lock.
+func (b *Batch) Rollback() error {
+	defer b.dbUnlock()
+	b.rwm.Lock()
+	defer b.rwm.Unlock()
+
+	switch {
+	case b.commited:
+		return ErrBatchCommitted
+	case b.rolledBack:
+		return ErrBatchRolledBack
+	case b.db.closed:
+		return ErrDbClosed
+	}
+	for _, buf := range b.buffers {
+		bytebufferpool.Put(buf)
+	}
+	if b.opts.ReadOnly {
+		b.rolledBack = true
+		return nil
+	}
+	for _, rec := range b.pendingWrites {
+		b.db.recordPool.Put(rec)
+	}
+	b.pendingWrites = b.pendingWrites[:0]
+	for key := range b.recordIndexes {
+		delete(b.recordIndexes, key)
+	}
+	b.rolledBack = true
+	return nil
+}
+
 // lookupExistingKey checks if the key already exists, if yes, returns the
 // LogRecord associated with the key.
 func (b *Batch) lookupExistingKey(key []byte) *LogRecord {
-	if len(b.logRecords) == 0 {
+	if len(b.recordIndexes) == 0 {
 		return nil
 	}
 	haskey := utils.MemHash(key)
 	// iterate over the bucket of entries that resulted in the same hash.
-	for _, entry := range b.logRecords[haskey] {
+	for _, entry := range b.recordIndexes[haskey] {
 		if bytes.Equal(b.pendingWrites[entry].Key, key) {
 			return b.pendingWrites[entry]
 		}
@@ -457,13 +489,13 @@ func (b *Batch) lookupExistingKey(key []byte) *LogRecord {
 // the records' offsets by hash of the given key.
 func (b *Batch) appendToPendingWrites(key []byte, record *LogRecord) {
 	b.pendingWrites = append(b.pendingWrites, record)
-	if b.logRecords == nil {
-		b.logRecords = make(map[uint64][]int)
+	if b.recordIndexes == nil {
+		b.recordIndexes = make(map[uint64][]int)
 	}
 	hashkey := utils.MemHash(key)
 	// stores the offset of the record to the hashkey of the key.
 	// eg: "hashkey" : {7, 21, 34}; haskey will be obviously different.
-	b.logRecords[hashkey] = append(b.logRecords[hashkey], len(b.pendingWrites)-1)
+	b.recordIndexes[hashkey] = append(b.recordIndexes[hashkey], len(b.pendingWrites)-1)
 }
 
 func (b *Batch) dbLock() {
@@ -483,6 +515,9 @@ func (b *Batch) dbUnlock() {
 }
 
 func (b *Batch) init(rdonly, sync bool, db *CaskDb) {
+	b.rwm.Lock()
+	defer b.rwm.Unlock()
+
 	b.opts.ReadOnly = rdonly
 	b.opts.Sync = sync
 	b.db = db
@@ -490,10 +525,13 @@ func (b *Batch) init(rdonly, sync bool, db *CaskDb) {
 }
 
 func (b *Batch) reset() {
+	b.rwm.Lock()
+	defer b.rwm.Unlock()
+
 	b.db = nil
 
 	b.pendingWrites = b.pendingWrites[:0]
-	b.logRecords = nil
+	b.recordIndexes = nil
 
 	b.commited = false
 	b.rolledBack = false
