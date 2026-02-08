@@ -2,6 +2,7 @@ package cask
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -34,7 +35,7 @@ type Batch struct {
 	opts          BatchOptions
 	commited      bool // whether the batch has been committed.
 	rolledBack    bool // whether the batch has been rolled back.
-	batchId       atomic.Uint64
+	batchId       *atomic.Uint64
 	buffers       []*bytebufferpool.ByteBuffer
 }
 
@@ -299,6 +300,141 @@ func (b *Batch) ExpiresIn(key []byte) (time.Duration, error) {
 		return time.Duration(record.Expire - uint64(now.UnixNano())), nil
 	}
 	return -1, nil
+}
+
+// PersistKey removes the ttl of the key, meaning the key will no longer expire
+// and be accessible until deleted.
+func (b *Batch) PersistKey(key []byte) error {
+	if b.opts.ReadOnly {
+		return ErrReadOnlyBatch
+	}
+	if b.db.closed {
+		return ErrDbClosed
+	}
+	if len(key) == 0 {
+		return ErrKeyIsEmpty
+	}
+	now := time.Now()
+
+	b.rwm.Lock()
+	defer b.rwm.Unlock()
+
+	record := b.lookupExistingKey(key)
+	if record != nil {
+		if record.Type == LogRecordDeleted || record.IsExpired(now.UnixNano()) {
+			return ErrKeyExpiredOrDeleted
+		}
+		record.Expire = 0
+		return nil
+	}
+	pos := b.db.index.Get(key)
+	if pos == nil {
+		return ErrKeyNotFound
+	}
+	enc, err := b.db.dataFiles.Read(pos)
+	if err != nil {
+		return fmt.Errorf("couldn't get record from datafile: %w", err)
+	}
+	now = time.Now()
+	record = decodeLogRecord(enc)
+
+	if record.Type == LogRecordDeleted || record.IsExpired(now.UnixNano()) {
+		b.db.index.Delete(record.Key)
+		return ErrKeyExpiredOrDeleted
+	}
+	if record.Expire > 0 {
+		record.Expire = 0
+		b.appendToPendingWrites(key, record)
+	}
+	return nil
+}
+
+// Commit commits the Batch. If the batch is read-only or empty, it's a noOp.
+//
+// It will iterate over pending writes and write the records to the database,
+// then writes a record with LogRecordBatchFinished type indicating the end
+// of the batch to guarantee atomicity.
+// Following this, it will write the indexes.
+func (b *Batch) Commit() error {
+	defer b.dbUnlock()
+
+	switch {
+	case b.db.closed:
+		return ErrDbClosed
+	case len(b.pendingWrites) == 0:
+		return nil
+	case b.opts.ReadOnly:
+		return nil
+	case b.commited:
+		return ErrBatchCommitted
+	case b.rolledBack:
+		return ErrBatchRolledBack
+	}
+	b.rwm.Lock()
+	defer b.rwm.Unlock()
+
+	batchId := b.batchId.Add(1)
+	now := time.Now().UnixNano()
+
+	for _, rec := range b.pendingWrites {
+		buf := bytebufferpool.Get()
+		b.buffers = append(b.buffers, buf)
+		rec.BatchId = batchId
+		enc := encodeLogRecord(rec, b.db.header, buf)
+		b.db.dataFiles.AddPendingWrites(enc)
+	}
+	biBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(biBytes, batchId)
+
+	// write a record that indicates the end of the batch
+	buf := bytebufferpool.Get()
+	b.buffers = append(b.buffers, buf)
+
+	rec := &LogRecord{
+		Key: biBytes, Type: LogRecordBatchFinished,
+	}
+	enc := encodeLogRecord(rec, b.db.header, buf)
+	b.db.dataFiles.AddPendingWrites(enc)
+
+	// write to wal
+	positions, err := b.db.dataFiles.WriteAll()
+	if err != nil {
+		b.db.dataFiles.ClearPendingWrites()
+		return fmt.Errorf("couldn't write pending writes to wal: %w", err)
+	}
+	if len(positions) != len(b.pendingWrites)+1 {
+		panic("position len is not equal to pending writes")
+	}
+	if b.opts.Sync && !b.db.opts.Sync {
+		if err := b.db.dataFiles.Sync(); err != nil {
+			return err
+		}
+	}
+	// write key and position to index
+	for i, rec := range b.pendingWrites {
+		if rec.Type == LogRecordDeleted || rec.IsExpired(now) {
+			b.db.index.Delete(rec.Key)
+		} else {
+			b.db.index.Put(rec.Key, positions[i])
+		}
+		if b.db.opts.WatchQueueSize == 0 {
+			b.db.recordPool.Put(rec)
+			continue
+		}
+		ev := &Event{
+			Key: rec.Key, Val: rec.Val,
+			BatchId: rec.BatchId,
+		}
+		if rec.Type != LogRecordDeleted {
+			ev.Action = WatchActionPut
+		} else {
+			ev.Action = WatchActionDelete
+		}
+		b.db.watcher.putEvent(ev)
+		b.db.recordPool.Put(rec)
+	}
+	b.commited = true
+	return nil
 }
 
 // lookupExistingKey checks if the key already exists, if yes, returns the
