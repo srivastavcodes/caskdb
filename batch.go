@@ -39,10 +39,8 @@ type Batch struct {
 }
 
 func (cdb *CaskDb) NewBatch(opts BatchOptions) *Batch {
-	b := &Batch{
-		db: cdb, opts: opts,
-	}
-	b.lock()
+	b := &Batch{db: cdb, opts: opts}
+	b.dbLock()
 	return b
 }
 
@@ -63,8 +61,8 @@ func (b *Batch) Put(key, val []byte) error {
 	if len(key) == 0 {
 		return ErrKeyIsEmpty
 	}
-	b.lock()
-	defer b.unlock()
+	b.rwm.Lock()
+	defer b.rwm.Unlock()
 
 	record := b.lookupExistingKey(key)
 	if record == nil {
@@ -92,8 +90,8 @@ func (b *Batch) PutWithTTL(key, val []byte, ttl time.Duration) error {
 	if len(key) == 0 {
 		return ErrKeyIsEmpty
 	}
-	b.lock()
-	defer b.unlock()
+	b.rwm.Lock()
+	defer b.rwm.Unlock()
 
 	record := b.lookupExistingKey(key)
 	if record == nil {
@@ -122,10 +120,10 @@ func (b *Batch) Get(key []byte) ([]byte, error) {
 	}
 	now := time.Now().UnixNano()
 	// retrieve value from pending writes if exists.
-	b.lock()
-	record := b.lookupExistingKey(key)
-	b.unlock()
+	b.rwm.RLock()
+	defer b.rwm.RUnlock()
 
+	record := b.lookupExistingKey(key)
 	if record != nil {
 		if record.Type == LogRecordDeleted || record.IsExpired(now) {
 			return nil, ErrKeyNotFound
@@ -144,7 +142,7 @@ func (b *Batch) Get(key []byte) ([]byte, error) {
 
 	if record.Type == LogRecordDeleted || record.IsExpired(now) {
 		b.db.index.Delete(record.Key)
-		return nil, ErrRecordExpired
+		return nil, ErrKeyExpiredOrDeleted
 	}
 	return record.Val, nil
 }
@@ -160,8 +158,8 @@ func (b *Batch) Delete(key []byte) error {
 	if len(key) == 0 {
 		return ErrKeyIsEmpty
 	}
-	b.lock()
-	defer b.unlock()
+	b.rwm.Lock()
+	defer b.rwm.Unlock()
 
 	// we'll need type and key for deletion later on, remaining mark zero val.
 	record := b.lookupExistingKey(key)
@@ -188,8 +186,8 @@ func (b *Batch) Exists(key []byte) (bool, error) {
 	}
 	now := time.Now().UnixNano()
 
-	b.lock()
-	defer b.unlock()
+	b.rwm.RLock()
+	defer b.rwm.RUnlock()
 
 	record := b.lookupExistingKey(key)
 	if record != nil {
@@ -210,6 +208,97 @@ func (b *Batch) Exists(key []byte) (bool, error) {
 		return false, nil
 	}
 	return true, nil
+}
+
+// Expire sets the ttl for the key.
+func (b *Batch) Expire(key []byte, ttl time.Duration) error {
+	if b.opts.ReadOnly {
+		return ErrReadOnlyBatch
+	}
+	if b.db.closed {
+		return ErrDbClosed
+	}
+	if len(key) == 0 {
+		return ErrKeyIsEmpty
+	}
+	now := time.Now()
+
+	b.rwm.Lock()
+	defer b.rwm.Unlock()
+
+	record := b.lookupExistingKey(key)
+	if record != nil {
+		if record.Type == LogRecordDeleted || record.IsExpired(now.UnixNano()) {
+			return ErrKeyNotFound
+		}
+		record.Expire = uint64(time.Now().Add(ttl).UnixNano())
+	}
+	pos := b.db.index.Get(key)
+	if pos == nil {
+		return ErrKeyNotFound
+	}
+	enc, err := b.db.dataFiles.Read(pos)
+	if err != nil {
+		return fmt.Errorf("couldn't get record from datafile: %w", err)
+	}
+	now = time.Now()
+	record = decodeLogRecord(enc)
+	// if the record is deleted or expired, we can delete the key from index
+	// since that makes the record invalid for read/write.
+	if record.Type == LogRecordDeleted || record.IsExpired(now.UnixNano()) {
+		b.db.index.Delete(record.Key)
+		return ErrKeyExpiredOrDeleted
+	}
+	record.Expire = uint64(now.Add(ttl).UnixNano())
+	// since we got the record from the wal, we need to re-write the record
+	// to pendingWrites/db
+	b.appendToPendingWrites(key, record)
+	return nil
+}
+
+// ExpiresIn returns the remaining duration the key is valid for (the ttl uk).
+// In case of an error returns -1 and the error.
+func (b *Batch) ExpiresIn(key []byte) (time.Duration, error) {
+	if b.db.closed {
+		return -1, ErrDbClosed
+	}
+	if len(key) == 0 {
+		return -1, ErrKeyIsEmpty
+	}
+	now := time.Now()
+
+	b.rwm.RLock()
+	defer b.rwm.RUnlock()
+
+	record := b.lookupExistingKey(key)
+	if record != nil {
+		if record.Expire == 0 {
+			return -1, nil
+		}
+		if record.Type == LogRecordDeleted || record.IsExpired(now.UnixNano()) {
+			return -1, ErrKeyExpiredOrDeleted
+		}
+		return time.Duration(record.Expire - uint64(now.UnixNano())), nil
+	}
+	pos := b.db.index.Get(key)
+	if pos == nil {
+		return -1, ErrKeyNotFound
+	}
+	enc, err := b.db.dataFiles.Read(pos)
+	if err != nil {
+		return -1, fmt.Errorf("couldn't get record from datafile: %w", err)
+	}
+	now = time.Now()
+	record = decodeLogRecord(enc)
+
+	if record.Type == LogRecordDeleted || record.IsExpired(now.UnixNano()) {
+		b.db.index.Delete(record.Key)
+		return -1, ErrKeyExpiredOrDeleted
+	}
+	if record.Expire > 0 {
+		return time.Duration(record.Expire - uint64(now.UnixNano())), nil
+	}
+	return -1, nil
 }
 
 // lookupExistingKey checks if the key already exists, if yes, returns the
@@ -241,19 +330,19 @@ func (b *Batch) appendToPendingWrites(key []byte, record *LogRecord) {
 	b.logRecords[hashkey] = append(b.logRecords[hashkey], len(b.pendingWrites)-1)
 }
 
-func (b *Batch) lock() {
+func (b *Batch) dbLock() {
 	if b.opts.ReadOnly {
-		b.rwm.RLock()
+		b.db.rwm.RLock()
 	} else {
-		b.rwm.Lock()
+		b.db.rwm.Lock()
 	}
 }
 
-func (b *Batch) unlock() {
+func (b *Batch) dbUnlock() {
 	if b.opts.ReadOnly {
-		b.rwm.RUnlock()
+		b.db.rwm.RUnlock()
 	} else {
-		b.rwm.Unlock()
+		b.db.rwm.Unlock()
 	}
 }
 
@@ -261,7 +350,7 @@ func (b *Batch) init(rdonly, sync bool, db *CaskDb) {
 	b.opts.ReadOnly = rdonly
 	b.opts.Sync = sync
 	b.db = db
-	b.lock()
+	b.dbLock()
 }
 
 func (b *Batch) reset() {
