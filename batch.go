@@ -46,6 +46,12 @@ func (cdb *CaskDb) NewBatch(opts BatchOptions) *Batch {
 	return b
 }
 
+// defaultNewBatch gets passed to the buffer pool to be returned as a default
+// Batch.
+func defaultNewBatch() any {
+	return &Batch{opts: DefaultBatchOptions}
+}
+
 // Put adds a key/val pair to the batch for writing and returns an error if any.
 func (b *Batch) Put(key, val []byte) error {
 	if b.opts.ReadOnly {
@@ -271,16 +277,4 @@ func (b *Batch) reset() {
 		bytebufferpool.Put(buffer)
 	}
 	b.buffers = b.buffers[:0]
-}
-
-// defaultNewBatch gets passed to the buffer pool to be returned as a default
-// Batch.
-func defaultNewBatch() any {
-	return &Batch{opts: DefaultBatchOptions}
-}
-
-// emptyLogRecord gets passed to the buffer pool to be returned as a default
-// LogRecord.
-func emptyLogRecord() any {
-	return &LogRecord{}
 }

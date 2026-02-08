@@ -34,6 +34,12 @@ type LogRecord struct {
 	Expire  uint64
 }
 
+// emptyLogRecord gets passed to the buffer pool to be returned as a default
+// LogRecord.
+func emptyLogRecord() any {
+	return &LogRecord{}
+}
+
 // IsExpired checks whether the log record is expired.
 func (lr *LogRecord) IsExpired(now int64) bool {
 	return lr.Expire > 0 && lr.Expire <= uint64(now)
