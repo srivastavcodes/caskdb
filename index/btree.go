@@ -24,8 +24,8 @@ type item struct {
 
 // memoryBTreeIterator represents a B-Tree index iterator.
 type memoryBTreeIterator struct {
-	bTree   *btree.BTree // underlying B-Tree implementation.
 	current *item        // current element being traversed.
+	bTree   *btree.BTree // underlying B-Tree implementation.
 	valid   bool         // indicates if the iterator is valid.
 	reverse bool         // indicates whether traversal should be in descending order.
 }
