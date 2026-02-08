@@ -16,13 +16,15 @@ type Indexer interface {
 // the key and position of the data in the Wal. The index will be rebuilt when the
 // database is opened.
 type BasicIndexer interface {
-	// Put puts the key and position into the index.
+	// Put puts the key and position into the index, if the exact key/val
+	// pair already exists, it gets replaced, and the old one is returned.
 	Put(key []byte, pos *wal.ChunkPosition) *wal.ChunkPosition
 
 	// Get gets the position of the key in the wal.
 	Get(key []byte) *wal.ChunkPosition
 
-	// Delete deletes the index of the key.
+	// Delete deletes the index of the key if exists, otherwise it's a noOp.
+	// Returns the position of the key deleted, else returns nil.
 	Delete(key []byte) (*wal.ChunkPosition, bool)
 
 	// Size represents the number of keys in the index.
