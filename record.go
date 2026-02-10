@@ -151,9 +151,9 @@ func decodeHintRecord(buf []byte) ([]byte, *wal.ChunkPosition) {
 	return key, pos
 }
 
-// encodeMergeFinRecord encodes the segment id in a little endian format and
+// encodeCompactionRecord encodes the segment id in a little endian format and
 // returns the result.
-func encodeMergeFinRecord(segmentId wal.SegmentId) []byte {
+func encodeCompactionRecord(segmentId wal.SegmentId) []byte {
 	buf := make([]byte, 4)
 	binary.LittleEndian.PutUint32(buf, segmentId)
 	return buf

@@ -100,9 +100,9 @@ func TestEncodeDecodeHintRecord(t *testing.T) {
 
 func TestEncodeMergeFinRecord(t *testing.T) {
 	seg := uint32(0xDEADBEEF)
-	b := encodeMergeFinRecord(seg)
+	b := encodeCompactionRecord(seg)
 	if len(b) != 4 {
-		t.Fatalf("encodeMergeFinRecord returned wrong length: %d", len(b))
+		t.Fatalf("encodeCompactionRecord returned wrong length: %d", len(b))
 	}
 	val := binary.LittleEndian.Uint32(b)
 	if seg != val {
