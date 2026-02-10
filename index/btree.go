@@ -104,8 +104,8 @@ func (mbt *MemoryBTree) Iterator(reverse bool) IndexIterator {
 	if mbt.bTree == nil {
 		return nil
 	}
-	mbt.mu.RLock()
-	defer mbt.mu.RUnlock()
+	mbt.mu.Lock()
+	defer mbt.mu.Unlock()
 	return newMemoryBTreeIterator(mbt.bTree, reverse)
 }
 
