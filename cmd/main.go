@@ -2,19 +2,14 @@ package main
 
 import (
 	"log"
-	"math/rand"
-	"os"
-	"path/filepath"
-	"strconv"
-	"time"
+
+	cask "github.com/srivastavcodes/caskdb"
 )
 
-var randName = rand.NewSource(time.Now().UnixNano())
-
 func main() {
-	str := filepath.Join("./", "caskdb"+strconv.Itoa(int(randName.Int63())))
-	err := os.MkdirAll(str, os.ModePerm)
+	db, err := cask.Open(cask.DefaultOptions)
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer func() { _ = db.Close() }()
 }

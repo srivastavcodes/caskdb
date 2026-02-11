@@ -33,9 +33,9 @@ type Batch struct {
 	pendingWrites []*LogRecord     // The data to be written.
 	recordIndexes map[uint64][]int // Map of [hasKey][indexes] for faster lookup to pending writes.
 	opts          BatchOptions
-	commited      bool           // whether the batch has been committed.
-	rolledBack    bool           // whether the batch has been rolled back.
-	batchId       *atomic.Uint64 // encoded as big endian uint64 as the key for a finished batch.
+	commited      bool          // whether the batch has been committed.
+	rolledBack    bool          // whether the batch has been rolled back.
+	batchId       atomic.Uint64 // encoded as big endian uint64 as the key for a finished batch.
 	buffers       []*bytebufferpool.ByteBuffer
 }
 
