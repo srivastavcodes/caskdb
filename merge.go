@@ -9,8 +9,11 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/srivastavcodes/caskdb/index"
 	wal "github.com/srivastavcodes/write-ahead-log"
+	"github.com/valyala/bytebufferpool"
 )
 
 const (
@@ -18,7 +21,155 @@ const (
 	MergeFinishedBatchId = 0
 )
 
-func (cdb *CaskDb) Merge(reopen bool) error {
+// Merge merges all the data files in the database. It will iterate all the data
+// files, find the valid data, and re-write the data to a new data file.
+//
+// Merge operation can be a very time-consuming operation, so it is recommended
+// to perform merge when the db is idle.
+//
+// If reopen is true, the original file will be replaced by the merge file, and
+// db's index will be rebuilt after the merge completes.
+func (cdb *CaskDb) Merge(reopen bool) (err error) {
+	if err = cdb.doMerge(); err != nil {
+		return fmt.Errorf("merge failed: %w", err)
+	}
+	if !reopen {
+		return nil
+	}
+	cdb.rwm.Lock()
+	defer cdb.rwm.Unlock()
+
+	if err = cdb.closeFiles(); err != nil {
+		slog.Error("couldn't close old files:", err)
+	}
+	// replace original files.
+	if err = loadMergeFiles(cdb.opts.DirPath); err != nil {
+		return err
+	}
+	// open data files after being replaced, with the same options.
+	cdb.dataFiles, err = cdb.openWalFiles()
+	if err != nil {
+		return err
+	}
+	// discard the old index.
+	cdb.index = index.NewIndexer()
+	// rebuild the index.
+	if err = cdb.loadIndex(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (cdb *CaskDb) doMerge() error {
+	cdb.rwm.Lock()
+
+	if cdb.closed {
+		cdb.rwm.Unlock()
+		return ErrDbClosed
+	}
+	if cdb.dataFiles.IsEmpty() {
+		cdb.rwm.Unlock()
+		return errors.New("data file is empty")
+	}
+	if cdb.merging {
+		cdb.rwm.Unlock()
+		return ErrMergeRunning
+	}
+	cdb.merging = true
+	// signal all waiting goroutines that merge is completed
+	defer cdb.cond.Broadcast()
+
+	prevSegFileId := cdb.dataFiles.ActiveSegmentId()
+	// rotate the internal wal creating a new active segment file
+	// because the older segment files will be merged and deleted
+	err := cdb.dataFiles.OpenNewActiveSegment()
+	if err != nil {
+		return err
+	}
+	// we can unlock the database here because the wal has been rotated and
+	// any later writes will preside on the new active segment as the merge
+	// operation will only read the older segment files.
+	cdb.rwm.Unlock()
+
+	// opens a different db instance than the original one and creates a
+	// merge directory to perform any writes, if directory already exists
+	// its replaced by a new one.
+	mergeDb, err := cdb.openMergeDb()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := mergeDb.Close(); err != nil {
+			slog.Error("couldn't close merge db:", err)
+		}
+	}()
+	buf := bytebufferpool.Get()
+	defer bytebufferpool.Put(buf)
+
+	reader := mergeDb.dataFiles.NewReader()
+	now := time.Now().UnixNano()
+
+	for {
+		buf.Reset()
+		enc, pos, err := reader.Next()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return err
+		}
+		record := decodeLogRecord(enc)
+		// only LogRecordNormal will be handled; LogRecordDeleted and LogRecordBatchFinished
+		// will be ignored because they are watermarks and not valid data.
+		valid := record.Expire == 0 || record.Expire > uint64(now)
+
+		if record.Type != LogRecordNormal && !valid {
+			continue
+		}
+		cdb.rwm.Lock()
+		kpos := cdb.index.Get(record.Key)
+		cdb.rwm.Unlock()
+
+		if kpos == nil || !positionEqual(kpos, pos) {
+			continue
+		}
+		// clear the batch id of the record; since all the data after merge will
+		// be valid data, it should be 0.
+		record.BatchId = MergeFinishedBatchId
+
+		// since mergeDb will never be used for any read/write operations after
+		// the merge completes, we don't need to update the index.
+		elr := encodeLogRecord(record, mergeDb.header, buf)
+
+		newPos, err := mergeDb.dataFiles.Write(elr)
+		if err != nil {
+			return fmt.Errorf("failed to write data in merge db: %w", err)
+		}
+		// and now we write the new position to the wal, also referred to as a Hint
+		// file in the BitCask paper.
+		// The Hint file will be used to rebuild the index quickly when the db is
+		// restarted.
+		ehr := encodeHintRecord(record.Key, newPos)
+		if _, err := mergeDb.hintFile.Write(ehr); err != nil {
+			return fmt.Errorf("failed to write position in hint file: %w", err)
+		}
+	}
+	// After rewrite all the data, we should add a file to indicate that the merge
+	// operation is completed. So when we restart the database, we can know that
+	// the merge is completed if the file exists, otherwise, we will delete the merge
+	// directory and redo the merge operation again.
+	watermarkedFile, err := mergeDb.openWatermarkedFile()
+	if err != nil {
+		return err
+	}
+	ecr := encodeCompactionRecord(prevSegFileId)
+
+	if _, err = watermarkedFile.Write(ecr); err != nil {
+		return fmt.Errorf("failed to write compaction record: %w", err)
+	}
+	if err = watermarkedFile.Close(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -58,10 +209,23 @@ func (cdb *CaskDb) openMergeDb() (*CaskDb, error) {
 		SegmentFileExt: hintFileNameSuffix,
 	})
 	if err != nil {
+		_ = mergedb.Close()
 		return nil, err
 	}
 	mergedb.hintFile = hintFile
 	return mergedb, nil
+}
+
+// openWatermarkedFile opens the watermarked file which indicates a completed
+// merge operation.
+func (cdb *CaskDb) openWatermarkedFile() (*wal.Wal, error) {
+	return wal.Open(wal.Options{
+		DirPath:        cdb.opts.DirPath,
+		SegmentSize:    GB,
+		Sync:           false,
+		BytesPerSync:   0,
+		SegmentFileExt: watermarkedFileExt,
+	})
 }
 
 // loadIndexFromHintFile reads hint records from the hint file and rebuilds the in-memory

@@ -52,8 +52,8 @@ type CaskDb struct {
 	opts             Options
 	index            index.Indexer
 	closed           bool
-	cond             sync.Cond // experimental usage with merging to avoid polling
-	merging          bool      // indicates if database is merging
+	cond             *sync.Cond // experimental usage with merging to avoid polling
+	merging          bool       // indicates if database is merging
 	recordPool       sync.Pool
 	batchPool        sync.Pool
 	watchCh          chan *Event
@@ -90,13 +90,12 @@ func Open(opts Options) (*CaskDb, error) {
 
 	acquired, err := lockF.TryLock()
 	if err != nil {
+		_ = lockF.Close()
 		return nil, err
 	}
 	if !acquired {
+		_ = lockF.Close()
 		return nil, ErrDatabaseDirInUse
-	}
-	if err = loadMergeFiles(opts.DirPath); err != nil {
-		return nil, err
 	}
 	cdb := &CaskDb{
 		lockF:  lockF,
@@ -111,6 +110,11 @@ func Open(opts Options) (*CaskDb, error) {
 			New: emptyLogRecord,
 		},
 	}
+	if err = loadMergeFiles(opts.DirPath); err != nil {
+		return nil, err
+	}
+	cdb.cond = sync.NewCond(&cdb.rwm)
+
 	if cdb.dataFiles, err = cdb.openWalFiles(); err != nil {
 		return nil, err
 	}
