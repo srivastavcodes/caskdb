@@ -100,7 +100,7 @@ func (cdb *CaskDb) loadIndexFromHintFile() error {
 	return nil
 }
 
-// loadMergeFiles loads all the merge files and copy the data to the original data
+// loadMergeFiles loads all the merge files and copies the data to the original data
 // directory. If there are no merge files, or the merge operation is not completed
 // yet, it will return nil.
 func loadMergeFiles(dirPath string) error {
