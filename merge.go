@@ -17,6 +17,10 @@ const (
 	MergeFinishedBatchId = 0
 )
 
+func (cdb *CaskDb) Merge(reopen bool) error {
+	return nil
+}
+
 // openMergeDb creates and opens a new CaskDb instance in a temporary merge directory
 // for compaction operations. It removes any existing merge directory, configures the
 // database with sync disabled for performance, and opens a hint file to track the new

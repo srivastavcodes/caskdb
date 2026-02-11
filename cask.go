@@ -1,6 +1,7 @@
 package cask
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -42,22 +43,22 @@ const (
 // Which means caskDb fits your needs if you don't need to store a large number
 // of keys and need lightning fast operations.
 type CaskDb struct {
-	lockF         *flock.Flock // lockF prevents multiple processes from using the same dir.
-	rwm           sync.RWMutex
-	header        []byte
-	dataFiles     *wal.Wal // dataFiles are sets of segment files in wal, which holds the data.
-	hintFile      *wal.Wal // hintFile is used to store the key and the position for fast startup.
-	opts          Options
-	index         index.Indexer
-	closed        bool
-	cond          sync.Cond // experimental usage with merging to avoid polling
-	merging       bool      // indicates if database is merging
-	recordPool    sync.Pool
-	batchPool     sync.Pool
-	expiredKeys   []byte // location where DeleteExpiredKeys execute.
-	watchCh       chan *Event
-	watcher       *Watcher
-	cronScheduler *cron.Cron // cron schedular for auto merge tasks.
+	lockF            *flock.Flock // lockF prevents multiple processes from using the same dir.
+	rwm              sync.RWMutex
+	header           []byte
+	dataFiles        *wal.Wal // dataFiles are sets of segment files in wal, which holds the data.
+	hintFile         *wal.Wal // hintFile is used to store the key and the position for fast startup.
+	expiredCursorKey []byte   // location where DeleteExpiredKeys execute.
+	opts             Options
+	index            index.Indexer
+	closed           bool
+	cond             sync.Cond // experimental usage with merging to avoid polling
+	merging          bool      // indicates if database is merging
+	recordPool       sync.Pool
+	batchPool        sync.Pool
+	watchCh          chan *Event
+	watcher          *Watcher
+	cronScheduler    *cron.Cron // cron schedular for auto merge tasks.
 }
 
 // Stats provides database metrics.
@@ -133,7 +134,7 @@ func Open(opts Options) (*CaskDb, error) {
 		)
 		_, err = cdb.cronScheduler.AddFunc(opts.AutoMergeCronExpr, func() {
 			// todo: we can introduce errCh or something to handle background errors
-			// _ = cdb.Merge(true)
+			_ = cdb.Merge(true)
 		})
 		if err != nil {
 			return nil, err
@@ -141,6 +142,219 @@ func Open(opts Options) (*CaskDb, error) {
 		cdb.cronScheduler.Start()
 	}
 	return cdb, nil
+}
+
+// Put puts a key value pair into the database. Internally, it will open a new
+// batch and commit it; so you can think of a batch operation that has only
+// one put operation.
+func (cdb *CaskDb) Put(key, val []byte) error {
+	batch := cdb.batchPool.Get().(*Batch)
+	defer func() {
+		batch.reset()
+		cdb.batchPool.Put(batch)
+	}()
+	batch.init(false, false, cdb)
+
+	if err := batch.Put(key, val); err != nil {
+		if err = batch.Rollback(); err != nil {
+			slog.Error("rollback failed:", err.Error())
+		}
+		return err
+	}
+	return batch.Commit()
+}
+
+// PutWithTTL puts a key value pair with ttl into the database. Internally, it will
+// open a new batch and commit it; so you can think of a batch operation that has
+// only one put operation. It is the callers' responsibility to call Sync if data must
+// be synced immediately.
+func (cdb *CaskDb) PutWithTTL(key, val []byte, ttl time.Duration) error {
+	batch := cdb.batchPool.Get().(*Batch)
+	defer func() {
+		batch.reset()
+		cdb.batchPool.Put(batch)
+	}()
+	batch.init(false, false, cdb)
+	if err := batch.PutWithTTL(key, val, ttl); err != nil {
+		if err = batch.Rollback(); err != nil {
+			slog.Error("rollback failed:", err.Error())
+		}
+		return err
+	}
+	return batch.Commit()
+}
+
+// Get gets the value for the key in the database. Internally, it will open a new
+// batch and commit it; so you can think of a batch operation that has only one
+// get operation.
+func (cdb *CaskDb) Get(key []byte) ([]byte, error) {
+	batch := cdb.batchPool.Get().(*Batch)
+	defer func() {
+		if err := batch.Commit(); err != nil {
+			slog.Error("commit failed:", err.Error())
+		}
+		batch.reset()
+		cdb.batchPool.Put(batch)
+	}()
+	batch.init(true, false, cdb)
+	return batch.Get(key)
+}
+
+// Delete deletes a key value pair from the database. Internally, it will open a
+// new batch and commit it; so you can think of a batch operation that has only
+// one delete operation. It is the callers' responsibility to call Sync if data
+// must be synced immediately.
+func (cdb *CaskDb) Delete(key []byte) error {
+	batch := cdb.batchPool.Get().(*Batch)
+	defer func() {
+		batch.reset()
+		cdb.batchPool.Put(batch)
+	}()
+	batch.init(false, false, cdb)
+
+	if err := batch.Delete(key); err != nil {
+		if err = batch.Rollback(); err != nil {
+			slog.Error("rollback failed:", err.Error())
+		}
+		return err
+	}
+	return batch.Commit()
+}
+
+// Exists gets the value for the key in the database. Internally, it will open
+// a new batch and commit it; so you can think of a batch operation that has
+// only one get operation.
+func (cdb *CaskDb) Exists(key []byte) (bool, error) {
+	batch := cdb.batchPool.Get().(*Batch)
+	defer func() {
+		if err := batch.Commit(); err != nil {
+			slog.Error("commit failed:", err.Error())
+		}
+		batch.reset()
+		cdb.batchPool.Put(batch)
+	}()
+	batch.init(true, false, cdb)
+	return batch.Exists(key)
+}
+
+// Expire set an expiration for the key in the database. Internally, it will open
+// a new batch and commit it; so you can think of a batch operation that has only
+// one delete operation. It is the callers' responsibility to call Sync if data
+// must be synced immediately.
+func (cdb *CaskDb) Expire(key []byte, ttl time.Duration) error {
+	batch := cdb.batchPool.Get().(*Batch)
+	defer func() {
+		batch.reset()
+		cdb.batchPool.Put(batch)
+	}()
+	batch.init(false, false, cdb)
+
+	if err := batch.Expire(key, ttl); err != nil {
+		if err = batch.Rollback(); err != nil {
+			slog.Error("rollback failed:", err.Error())
+		}
+	}
+	return batch.Commit()
+}
+
+// ExpiresIn gets the ttl for the key in the database. Internally, it will open
+// a new batch and commit it; so you can think of a batch operation that has
+// only one get operation.
+func (cdb *CaskDb) ExpiresIn(key []byte) (time.Duration, error) {
+	batch := cdb.batchPool.Get().(*Batch)
+	defer func() {
+		if err := batch.Commit(); err != nil {
+			slog.Error("commit failed:", err.Error())
+		}
+		batch.reset()
+		cdb.batchPool.Put(batch)
+	}()
+	batch.init(true, false, cdb)
+	return batch.ExpiresIn(key)
+}
+
+// PersistKey removes the expiration for the key in the database. Internally, it
+// will open a new batch and commit it; so you can think of a batch operation that
+// has only one delete operation. It is the callers' responsibility to call Sync
+// if data must be synced immediately.
+func (cdb *CaskDb) PersistKey(key []byte) error {
+	batch := cdb.batchPool.Get().(*Batch)
+	defer func() {
+		batch.reset()
+		cdb.batchPool.Put(batch)
+	}()
+	batch.init(false, false, cdb)
+
+	if err := batch.PersistKey(key); err != nil {
+		if err = batch.Rollback(); err != nil {
+			slog.Error("rollback failed:", err.Error())
+		}
+	}
+	return batch.Commit()
+}
+
+// Watch returns a receiver channel of an Event type which can be used to listen
+// for events sent by the Watcher.
+func (cdb *CaskDb) Watch() (<-chan *Event, error) {
+	if cdb.opts.WatchQueueSize > 0 {
+		return nil, ErrWatchDisabled
+	}
+	return cdb.watchCh, nil
+}
+
+// DeleteExpiredKeys scans the entire index in ascending order to delete expired
+// keys. It is a time-consuming operation, so we need to specify a timeout to
+// prevent the db from being unavailable for a long time.
+func (cdb *CaskDb) DeleteExpiredKeys(timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	// use channel to pass error safely without race condition.
+	errch := make(chan error, 1)
+
+	now := time.Now().UnixNano()
+	go func() {
+		cdb.rwm.Lock()
+		defer cdb.rwm.Unlock()
+
+		for {
+			positions := make([]*wal.ChunkPosition, 0, 100)
+			// function to stop after 100 keys have been selected
+			handlerFn := func(key []byte, pos *wal.ChunkPosition) (bool, error) {
+				positions = append(positions, pos)
+				return !(len(positions) >= 100), nil
+			}
+			cdb.index.AscendGreaterOrEqual(cdb.expiredCursorKey, handlerFn)
+
+			// if the keys in db.index have been traversed, len(positions)
+			// will be 0.
+			if len(positions) == 0 {
+				errch <- nil
+				cdb.expiredCursorKey = nil
+				return
+			}
+			// delete it from the index if the key is expired.
+			for _, pos := range positions {
+				enc, err := cdb.dataFiles.Read(pos)
+				if err != nil {
+					errch <- err
+					return
+				}
+				rec := decodeLogRecord(enc)
+				if rec.IsExpired(now) {
+					cdb.index.Delete(rec.Key)
+				}
+				cdb.expiredCursorKey = rec.Key
+			}
+		}
+	}()
+	// we return nil if a timeout occurs since that is the expected behavior.
+	// The background goroutine will continue running until completion.
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-errch:
+		return err
+	}
 }
 
 // loadIndex loads the index from the hint file and from the wal respectively;
