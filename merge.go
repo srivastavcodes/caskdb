@@ -186,6 +186,7 @@ func getCompactionWatermark(mergePath string) (wal.SegmentId, error) {
 
 // mergeDirPath concatenates the MergeDirSuffixName into the base of dirPath and
 // returns the new path.
+// eg: dirPath = working/dbdir; returns working/dbdir-merge
 func mergeDirPath(dirPath string) string {
 	dirP := filepath.Dir(dirPath)
 	base := filepath.Base(dirPath)
