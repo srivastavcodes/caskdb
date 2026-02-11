@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -131,7 +132,12 @@ func loadMergeFiles(dirPath string) error {
 			return
 		}
 		dstFile := wal.SegmentFileName(dirPath, suffix, fileId)
-		_ = os.Rename(srcFile, dstFile)
+		// workingDir/dbdir-merge/000000001.SEG -> workingDir/dbdir/000000001.SEG
+		if err = os.Rename(srcFile, dstFile); err != nil {
+			slog.Error(fmt.Sprintf("loadMergeFiles-copyFile: failed to rename %s to %s: %v",
+				srcFile, dstFile, err,
+			))
+		}
 	}
 	watermarkedSegId, err := getCompactionWatermark(mdir)
 	if err != nil {
