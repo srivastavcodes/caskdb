@@ -141,10 +141,10 @@ func loadMergeFiles(dirPath string) error {
 	// lesser than that should be moved to the original data directory, and the
 	// original data files should be deleted.
 	for id := uint32(1); id <= watermarkedSegId; id++ {
-		destFile := wal.SegmentFileName(dirPath, dataFileNameSuffix, id)
+		dstFile := wal.SegmentFileName(dirPath, dataFileNameSuffix, id)
 		// remove the original data file
-		if _, err = os.Stat(destFile); nil == err {
-			if err = os.Remove(destFile); err != nil {
+		if _, err = os.Stat(dstFile); nil == err {
+			if err = os.Remove(dstFile); err != nil {
 				return err
 			}
 		}
