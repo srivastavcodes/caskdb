@@ -44,31 +44,33 @@ type Iterator interface {
 // handler controls early termination by returning false.
 type Traverser interface {
 	// AscendRange iterates over items within [start, end], in ascending order
-	// invoking the handler function for each item. Stops if handlerFn returns
+	// invoking the handler function for each item. Stops if handler returns
 	// false.
-	AscendRange(start, end []byte, handlerFn func(key []byte, pos *wal.ChunkPosition) (bool, error))
+	AscendRange(start, end []byte, handler Handler)
 
 	// DescendRange iterates over items within [start, end], in descending order
-	// invoking the handler function for each item. Stops if handlerFn returns false.
-	DescendRange(start, end []byte, handlerFn func(key []byte, pos *wal.ChunkPosition) (bool, error))
+	// invoking the handler function for each item. Stops if handler returns false.
+	DescendRange(start, end []byte, handler Handler)
 
 	// Ascend iterates over items in ascending order and invokes the handler
 	// function for each item. If the handler function returns false, the
 	// iteration stops.
-	Ascend(handlerFn func(key []byte, pos *wal.ChunkPosition) (bool, error))
+	Ascend(handler Handler)
 
 	// Descend iterates over items in descending order and invokes the handler
 	// function for each item. If the handler function returns false, the
 	// iteration stops.
-	Descend(handlerFn func(key []byte, pos *wal.ChunkPosition) (bool, error))
+	Descend(handler Handler)
 
 	// AscendGreaterOrEqual iterates over items starting from the given key
-	// (keys >= givenKey), in ascending order. Stops if handlerFn return false.
-	AscendGreaterOrEqual(key []byte, handlerFn func(key []byte, pos *wal.ChunkPosition) (bool, error))
+	// (keys >= givenKey), in ascending order. Stops if the handler returns
+	// false.
+	AscendGreaterOrEqual(key []byte, handler Handler)
 
 	// DescendLessOrEqual iterates over items starting from the given key
-	// (keys >= givenKey), in descending order. Stops if handlerFn return false.
-	DescendLessOrEqual(key []byte, handlerFn func(key []byte, pos *wal.ChunkPosition) (bool, error))
+	// (keys >= givenKey), in descending order. Stops if the handler returns
+	// false.
+	DescendLessOrEqual(key []byte, handler Handler)
 }
 
 type IndexerType byte
