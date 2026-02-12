@@ -42,6 +42,7 @@ func (i *Iterator) Rewind() {
 		return
 	}
 	i.indexIter.Rewind()
+	i.skipToNext()
 }
 
 // Seek positions the iterator at a specific key in the database. After seeking
@@ -51,6 +52,7 @@ func (i *Iterator) Seek(key []byte) {
 		return
 	}
 	i.indexIter.Seek(key)
+	i.skipToNext()
 }
 
 // Next advances the iterator to the next valid entry in the database skipping
