@@ -233,6 +233,7 @@ func (b *Batch) Expire(key []byte, ttl time.Duration) error {
 			return ErrKeyNotFound
 		}
 		record.Expire = uint64(time.Now().Add(ttl).UnixNano())
+		return nil
 	}
 	pos := b.db.index.Get(key)
 	if pos == nil {
