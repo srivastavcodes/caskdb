@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -161,7 +161,7 @@ func (cdb *CaskDb) Put(key, val []byte) error {
 
 	if err := batch.Put(key, val); err != nil {
 		if err = batch.Rollback(); err != nil {
-			slog.Error("rollback failed:", err.Error())
+			log.Println("rollback failed:", err.Error())
 		}
 		return err
 	}
@@ -181,7 +181,7 @@ func (cdb *CaskDb) PutWithTTL(key, val []byte, ttl time.Duration) error {
 	batch.init(false, false, cdb)
 	if err := batch.PutWithTTL(key, val, ttl); err != nil {
 		if err = batch.Rollback(); err != nil {
-			slog.Error("rollback failed:", err.Error())
+			log.Println("rollback failed:", err.Error())
 		}
 		return err
 	}
@@ -195,7 +195,7 @@ func (cdb *CaskDb) Get(key []byte) ([]byte, error) {
 	batch := cdb.batchPool.Get().(*Batch)
 	defer func() {
 		if err := batch.Commit(); err != nil {
-			slog.Error("commit failed:", err.Error())
+			log.Println("commit failed:", err.Error())
 		}
 		batch.reset()
 		cdb.batchPool.Put(batch)
@@ -218,7 +218,7 @@ func (cdb *CaskDb) Delete(key []byte) error {
 
 	if err := batch.Delete(key); err != nil {
 		if err = batch.Rollback(); err != nil {
-			slog.Error("rollback failed:", err.Error())
+			log.Println("rollback failed:", err.Error())
 		}
 		return err
 	}
@@ -232,7 +232,7 @@ func (cdb *CaskDb) Exists(key []byte) (bool, error) {
 	batch := cdb.batchPool.Get().(*Batch)
 	defer func() {
 		if err := batch.Commit(); err != nil {
-			slog.Error("commit failed:", err.Error())
+			log.Println("commit failed:", err.Error())
 		}
 		batch.reset()
 		cdb.batchPool.Put(batch)
@@ -255,7 +255,7 @@ func (cdb *CaskDb) Expire(key []byte, ttl time.Duration) error {
 
 	if err := batch.Expire(key, ttl); err != nil {
 		if err = batch.Rollback(); err != nil {
-			slog.Error("rollback failed:", err.Error())
+			log.Println("rollback failed:", err.Error())
 		}
 	}
 	return batch.Commit()
@@ -268,7 +268,7 @@ func (cdb *CaskDb) ExpiresIn(key []byte) (time.Duration, error) {
 	batch := cdb.batchPool.Get().(*Batch)
 	defer func() {
 		if err := batch.Commit(); err != nil {
-			slog.Error("commit failed:", err.Error())
+			log.Println("commit failed:", err.Error())
 		}
 		batch.reset()
 		cdb.batchPool.Put(batch)
@@ -291,7 +291,7 @@ func (cdb *CaskDb) PersistKey(key []byte) error {
 
 	if err := batch.PersistKey(key); err != nil {
 		if err = batch.Rollback(); err != nil {
-			slog.Error("rollback failed:", err.Error())
+			log.Println("rollback failed:", err.Error())
 		}
 	}
 	return batch.Commit()
@@ -505,7 +505,7 @@ func (cdb *CaskDb) Stat() *Stats {
 
 	size, err := utils.DirSize(cdb.opts.DirPath)
 	if err != nil {
-		slog.Error("error computing directory size:", err)
+		log.Println("error computing directory size:", err)
 	}
 	return &Stats{
 		KeyCount: cdb.index.Size(),

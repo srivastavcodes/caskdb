@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"math"
 	"os"
@@ -40,7 +41,7 @@ func (cdb *CaskDb) Merge(reopen bool) (err error) {
 	defer cdb.rwm.Unlock()
 
 	if err = cdb.closeFiles(); err != nil {
-		slog.Error("couldn't close old files:", err)
+		log.Println("couldn't close old files:", err)
 	}
 	// replace original files.
 	if err = loadMergeFiles(cdb.opts.DirPath); err != nil {
@@ -100,7 +101,7 @@ func (cdb *CaskDb) doMerge() error {
 	}
 	defer func() {
 		if err := mergeDb.Close(); err != nil {
-			slog.Error("couldn't close merge db:", err)
+			log.Println("couldn't close merge db:", err)
 		}
 	}()
 	buf := bytebufferpool.Get()
