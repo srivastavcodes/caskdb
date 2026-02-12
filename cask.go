@@ -300,7 +300,7 @@ func (cdb *CaskDb) PersistKey(key []byte) error {
 // Watch returns a receiver channel of an Event type which can be used to listen
 // for events sent by the Watcher.
 func (cdb *CaskDb) Watch() (<-chan *Event, error) {
-	if cdb.opts.WatchQueueSize > 0 {
+	if cdb.opts.WatchQueueSize <= 0 {
 		return nil, ErrWatchDisabled
 	}
 	return cdb.watchCh, nil
