@@ -160,7 +160,7 @@ func (cdb *CaskDb) Put(key, val []byte) error {
 	batch.init(false, false, cdb)
 
 	if err := batch.Put(key, val); err != nil {
-		if err = batch.Rollback(); err != nil {
+		if err := batch.Rollback(); err != nil {
 			log.Println("rollback failed:", err.Error())
 		}
 		return err
@@ -180,7 +180,7 @@ func (cdb *CaskDb) PutWithTTL(key, val []byte, ttl time.Duration) error {
 	}()
 	batch.init(false, false, cdb)
 	if err := batch.PutWithTTL(key, val, ttl); err != nil {
-		if err = batch.Rollback(); err != nil {
+		if err := batch.Rollback(); err != nil {
 			log.Println("rollback failed:", err.Error())
 		}
 		return err
@@ -217,7 +217,7 @@ func (cdb *CaskDb) Delete(key []byte) error {
 	batch.init(false, false, cdb)
 
 	if err := batch.Delete(key); err != nil {
-		if err = batch.Rollback(); err != nil {
+		if err := batch.Rollback(); err != nil {
 			log.Println("rollback failed:", err.Error())
 		}
 		return err
@@ -254,9 +254,10 @@ func (cdb *CaskDb) Expire(key []byte, ttl time.Duration) error {
 	batch.init(false, false, cdb)
 
 	if err := batch.Expire(key, ttl); err != nil {
-		if err = batch.Rollback(); err != nil {
+		if err := batch.Rollback(); err != nil {
 			log.Println("rollback failed:", err.Error())
 		}
+		return err
 	}
 	return batch.Commit()
 }
@@ -290,9 +291,10 @@ func (cdb *CaskDb) PersistKey(key []byte) error {
 	batch.init(false, false, cdb)
 
 	if err := batch.PersistKey(key); err != nil {
-		if err = batch.Rollback(); err != nil {
+		if err := batch.Rollback(); err != nil {
 			log.Println("rollback failed:", err.Error())
 		}
+		return err
 	}
 	return batch.Commit()
 }
