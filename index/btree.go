@@ -126,11 +126,11 @@ func (mbt *MemoryBTree) AscendRange(start, end []byte, handler Handler) {
 	greaterOrEqual, lessThan := &item{key: start}, &item{key: end}
 
 	iterator := func(i btree.Item) bool {
-		ok, err := handler(i.(*item).key, i.(*item).pos)
+		cont, err := handler(i.(*item).key, i.(*item).pos)
 		if err != nil {
 			return false
 		}
-		return ok
+		return cont
 	}
 	mbt.bTree.AscendRange(greaterOrEqual, lessThan, iterator)
 }
@@ -139,16 +139,16 @@ func (mbt *MemoryBTree) DescendRange(start, end []byte, handler Handler) {
 	mbt.mu.RLock()
 	defer mbt.mu.RUnlock()
 
-	greaterOrEqual, lessThan := &item{key: start}, &item{key: end}
+	lessOrEqual, greaterThan := &item{key: start}, &item{key: end}
 
 	iterator := func(i btree.Item) bool {
-		ok, err := handler(i.(*item).key, i.(*item).pos)
+		cont, err := handler(i.(*item).key, i.(*item).pos)
 		if err != nil {
 			return false
 		}
-		return ok
+		return cont
 	}
-	mbt.bTree.DescendRange(greaterOrEqual, lessThan, iterator)
+	mbt.bTree.DescendRange(lessOrEqual, greaterThan, iterator)
 }
 
 func (mbt *MemoryBTree) Ascend(handler Handler) {
@@ -156,11 +156,11 @@ func (mbt *MemoryBTree) Ascend(handler Handler) {
 	defer mbt.mu.RUnlock()
 
 	iterator := func(i btree.Item) bool {
-		ok, err := handler(i.(*item).key, i.(*item).pos)
+		cont, err := handler(i.(*item).key, i.(*item).pos)
 		if err != nil {
 			return false
 		}
-		return ok
+		return cont
 	}
 	mbt.bTree.Ascend(iterator)
 }
@@ -170,11 +170,11 @@ func (mbt *MemoryBTree) Descend(handler Handler) {
 	defer mbt.mu.RUnlock()
 
 	iterator := func(i btree.Item) bool {
-		ok, err := handler(i.(*item).key, i.(*item).pos)
+		cont, err := handler(i.(*item).key, i.(*item).pos)
 		if err != nil {
 			return false
 		}
-		return ok
+		return cont
 	}
 	mbt.bTree.Descend(iterator)
 }
@@ -184,11 +184,11 @@ func (mbt *MemoryBTree) AscendGreaterOrEqual(key []byte, handler Handler) {
 	defer mbt.mu.RUnlock()
 
 	iterator := func(i btree.Item) bool {
-		ok, err := handler(i.(*item).key, i.(*item).pos)
+		cont, err := handler(i.(*item).key, i.(*item).pos)
 		if err != nil {
 			return false
 		}
-		return ok
+		return cont
 	}
 	mbt.bTree.AscendGreaterOrEqual(&item{key: key}, iterator)
 }
@@ -198,11 +198,11 @@ func (mbt *MemoryBTree) DescendLessOrEqual(key []byte, handler Handler) {
 	defer mbt.mu.RUnlock()
 
 	iterator := func(i btree.Item) bool {
-		ok, err := handler(i.(*item).key, i.(*item).pos)
+		cont, err := handler(i.(*item).key, i.(*item).pos)
 		if err != nil {
 			return false
 		}
-		return ok
+		return cont
 	}
 	mbt.bTree.DescendLessOrEqual(&item{key: key}, iterator)
 }
