@@ -52,13 +52,6 @@ func example1() {
 	if err != nil {
 		log.Println("should err")
 	}
-	// replace for key1 and put a ttl with it.
-	err = db.PutWithTTL([]byte("key1"), []byte("value1"), 3*time.Second)
-	if err != nil {
-		log.Fatal(err)
-	}
-	time.Sleep(3 * time.Second)
-	val, err = db.Get([]byte("key1"))
 }
 
 func example2() {
