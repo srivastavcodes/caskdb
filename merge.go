@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/srivastavcodes/caskdb/index"
+	"github.com/srivastavcodes/caskdb/utils"
 	wal "github.com/srivastavcodes/write-ahead-log"
 	"github.com/valyala/bytebufferpool"
 )
@@ -61,7 +62,7 @@ func (cdb *CaskDb) Merge(reopen bool) (err error) {
 	return nil
 }
 
-func (cdb *CaskDb) doMerge() error {
+func (cdb *CaskDb) doMerge() (err error) {
 	cdb.rwm.Lock()
 
 	if cdb.closed {
@@ -69,8 +70,10 @@ func (cdb *CaskDb) doMerge() error {
 		return ErrDbClosed
 	}
 	if cdb.dataFiles.IsEmpty() {
+		size, _ := utils.DirSize(cdb.opts.DirPath)
 		cdb.rwm.Unlock()
-		return errors.New("data file is empty")
+		log.Printf("Err: datafile is empty. size=%d", size)
+		return
 	}
 	if cdb.merging {
 		cdb.rwm.Unlock()
@@ -78,12 +81,15 @@ func (cdb *CaskDb) doMerge() error {
 	}
 	cdb.merging = true
 	// signal all waiting goroutines that merge is completed
-	defer cdb.cond.Broadcast()
+	defer func() {
+		cdb.merging = false
+		cdb.cond.Broadcast()
+	}()
 
 	prevSegFileId := cdb.dataFiles.ActiveSegmentId()
 	// rotate the internal wal creating a new active segment file
 	// because the older segment files will be merged and deleted
-	err := cdb.dataFiles.OpenNewActiveSegment()
+	err = cdb.dataFiles.OpenNewActiveSegment()
 	if err != nil {
 		return err
 	}
@@ -171,7 +177,7 @@ func (cdb *CaskDb) doMerge() error {
 	if err = watermarkedFile.Close(); err != nil {
 		return err
 	}
-	return nil
+	return
 }
 
 // openMergeDb creates and opens a new CaskDb instance in a temporary merge directory
