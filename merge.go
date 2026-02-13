@@ -113,7 +113,7 @@ func (cdb *CaskDb) doMerge() (err error) {
 	buf := bytebufferpool.Get()
 	defer bytebufferpool.Put(buf)
 
-	reader := mergeDb.dataFiles.NewReader()
+	reader := cdb.dataFiles.NewReaderWithMax(prevSegFileId)
 	now := time.Now().UnixNano()
 
 	for {
