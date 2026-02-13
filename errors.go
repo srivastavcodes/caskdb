@@ -4,7 +4,7 @@ import "errors"
 
 var (
 	ErrKeyIsEmpty          = errors.New("key is empty")
-	ErrKeyExpiredOrDeleted = errors.New("key has either expired or been marked for deletion")
+	ErrKeyExpiredOrDeleted = errors.New("key has either expired or been deleted")
 	ErrKeyNotFound         = errors.New("not found in database")
 	ErrDatabaseDirInUse    = errors.New("database directory is being used by another process")
 	ErrReadOnlyBatch       = errors.New("batch is read only")
