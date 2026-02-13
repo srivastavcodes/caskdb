@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	example3()
+	example2()
 }
 
 func example1() {
@@ -78,7 +78,12 @@ func example2() {
 	fmt.Printf("1st access for key1: %s\n", val)
 
 	// replace for key1 and put a ttl with it.
-	err = db.PutWithTTL([]byte("key1"), []byte("value1"), 3*time.Second)
+	err = db.PutWithTTL([]byte("key2"), []byte("value2"), 5*time.Second)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = db.Expire([]byte("key1"), 3*time.Second)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -88,6 +93,15 @@ func example2() {
 	if err != nil {
 		log.Printf("expired access for key1: %v\n", err)
 	}
+	val, err = db.Get([]byte("key2"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	exp, err := db.ExpiresIn([]byte("key2"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("1st access for key2: %s, expiresIn=%s\n", val, exp.String())
 }
 
 func example3() {
